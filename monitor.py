@@ -6,14 +6,16 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# The only URLs you need
+# ✅ FIXED: No trailing spaces in URLs
 NSW_URLS = [
     "https://www.nsw.gov.au/departments-and-agencies/building-commission/news",
     "https://www.nsw.gov.au/departments-and-agencies/building-commission/register-of-building-work-orders"
 ]
 
 def send_telegram(text):
-    if not text: return
+    if not text: 
+        return
+    # ✅ FIXED: No spaces in bot URL
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
 
@@ -29,45 +31,63 @@ def get_nsw_data():
             
             # This 'main' tag ignores all the header/footer menu junk
             content = soup.find('main')
-            if not content: continue
+            if not content: 
+                print(f"⚠️ No <main> tag found on {url}")
+                continue
 
-            for a in content.find_all('a', href=True):
-                title = a.get_text().strip()
-                link = a['href']
-                
-                # 1. Basic Filters to keep the list clean
-                if len(title) < 15: continue
-                if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "share", "back to"]): continue
-                
-                # 2. Fix relative links
-                full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
-                
-                # 3. Prevent duplicates
-                if full_url not in seen_links:
-                    # Label based on the page it came from
-                    label = "⚖️ ORDER" if "register" in url else "📰 NEWS"
-                    results.append(f"• <b>[{label}]</b> {html.escape(title)}\n🔗 {full_url}")
-                    seen_links.add(full_url)
-
-        except Exception as e:
-            print(f"Error on {url}: {e}")
+            # ✅ DETECT PAGE TYPE
+            is_register = "register" in url
             
-    return results
-
-def main():
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Missing Secrets!")
-        return
-
-    headlines = get_nsw_data()
-    
-    if headlines:
-        header = f"🏢 <b>NSW Building Commission Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
-        # Combine everything into one message
-        send_telegram(header + "\n\n".join(headlines[:25]))
-        print("✅ Message sent.")
-    else:
-        print("🧐 No headlines found.")
-
-if __name__ == "__main__":
-    main()
+            if is_register:
+                print(f"📋 Parsing Register page...")
+                # Register page uses tables or definition lists
+                # Look for table rows, list items, or links in the main content
+                for elem in content.find_all(['tr', 'li', 'dt', 'dd']):
+                    a = elem.find('a', href=True)
+                    if a:
+                        title = a.get_text().strip()
+                        link = a['href']
+                        
+                        # Filter junk
+                        if len(title) < 10: 
+                            continue
+                        if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "share", "back to", "top of page", "skip"]): 
+                            continue
+                        
+                        # Fix relative links
+                        full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
+                        
+                        # Prevent duplicates
+                        if full_url not in seen_links and "nsw.gov.au" in full_url:
+                            results.append(f"• <b>[⚖️ ORDER]</b> {html.escape(title)}\n🔗 {full_url}")
+                            seen_links.add(full_url)
+                
+                # Fallback: grab all links in main that look like order titles
+                if len(results) == 0:
+                    print("🔍 Fallback: scanning all links in register page...")
+                    for a in content.find_all('a', href=True):
+                        title = a.get_text().strip()
+                        link = a['href']
+                        
+                        if len(title) < 15: 
+                            continue
+                        if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "share", "back to", "home", "contact", "menu"]): 
+                            continue
+                        
+                        full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
+                        
+                        if full_url not in seen_links and "register" in full_url and "nsw.gov.au" in full_url:
+                            results.append(f"• <b>[⚖️ ORDER]</b> {html.escape(title)}\n🔗 {full_url}")
+                            seen_links.add(full_url)
+            
+            else:
+                # News page - original logic
+                print(f"📰 Parsing News page...")
+                for a in content.find_all('a', href=True):
+                    title = a.get_text().strip()
+                    link = a['href']
+                    
+                    # Basic Filters to keep the list clean
+                    if len(title) < 15: 
+                        continue
+                    if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "
