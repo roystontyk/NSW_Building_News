@@ -1,121 +1,91 @@
-import os, requests, time, json, warnings, html
-from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+monitor
+succeeded 1 minute ago in 11s
+Search logs
+1s
+Current runner version: '2.332.0'
+Runner Image Provisioner
+Operating System
+Runner Image
+GITHUB_TOKEN Permissions
+Secret source: Actions
+Prepare workflow directory
+Prepare all required actions
+Getting action download info
+Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+Complete job name: monitor
+0s
+Run actions/checkout@v4
+Syncing repository: roystontyk/NSW_Building_News
+Getting Git version info
+Temporarily overriding HOME='/home/runner/work/_temp/d33c20fa-fdaa-4af4-9655-35e17222588a' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/NSW_Building_News/NSW_Building_News
+Deleting the contents of '/home/runner/work/NSW_Building_News/NSW_Building_News'
+Initializing the repository
+Disabling automatic garbage collection
+Setting up auth
+Fetching the repository
+Determining the checkout info
+/usr/bin/git sparse-checkout disable
+/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Checking out the ref
+/usr/bin/git log -1 --format=%H
+aa813bf777710fbfc733dc007047cbfaa90c5468
+1s
+Run actions/setup-python@v5
+Installed versions
+1s
+Run pip install requests beautifulsoup4
+Collecting requests
+  Downloading requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+Collecting beautifulsoup4
+  Downloading beautifulsoup4-4.14.3-py3-none-any.whl.metadata (3.8 kB)
+Collecting charset_normalizer<4,>=2 (from requests)
+  Downloading charset_normalizer-3.4.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (39 kB)
+Collecting idna<4,>=2.5 (from requests)
+  Downloading idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+Collecting urllib3<3,>=1.21.1 (from requests)
+  Downloading urllib3-2.6.3-py3-none-any.whl.metadata (6.9 kB)
+Collecting certifi>=2017.4.17 (from requests)
+  Downloading certifi-2026.2.25-py3-none-any.whl.metadata (2.5 kB)
+Collecting soupsieve>=1.6.1 (from beautifulsoup4)
+  Downloading soupsieve-2.8.3-py3-none-any.whl.metadata (4.6 kB)
+Collecting typing-extensions>=4.0.0 (from beautifulsoup4)
+  Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Downloading requests-2.32.5-py3-none-any.whl (64 kB)
+Downloading charset_normalizer-3.4.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (193 kB)
+Downloading idna-3.11-py3-none-any.whl (71 kB)
+Downloading urllib3-2.6.3-py3-none-any.whl (131 kB)
+Downloading beautifulsoup4-4.14.3-py3-none-any.whl (107 kB)
+Downloading certifi-2026.2.25-py3-none-any.whl (153 kB)
+Downloading soupsieve-2.8.3-py3-none-any.whl (37 kB)
+Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Installing collected packages: urllib3, typing-extensions, soupsieve, idna, charset_normalizer, certifi, requests, beautifulsoup4
 
-warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
-
-# === 🎛️ CONFIG ===
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
-CF_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
-
-# ✅ NSW BUILDING COMMISSION SOURCES
-TARGET_URLS = [
-    "https://www.nsw.gov.au/departments-and-agencies/building-commission/news",
-    "https://www.nsw.gov.au/departments-and-agencies/building-commission/register-of-building-work-orders"
-]
-
-MAX_ITEMS = 15
-
-def log(msg): print(f"📝 [LOG] {msg}", flush=True)
-
-def send_telegram(text):
-    if len(text) > 4000: text = text[:3950] + "\n\n...(truncated)"
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    try:
-        r = requests.post(url, json=data, timeout=30)
-        return r.json()
-    except Exception as e:
-        log(f"✗ Telegram: {e}")
-        return None
-
-def clean_url(href, base):
-    if not href: return base
-    if href.startswith(('http://','https://')): return href
-    return f"{base}{href}" if href.startswith('/') else f"{base}/{href}"
-
-def scrape_nsw(url):
-    try:
-        log(f"🔍 Scraping: {url}")
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=30)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.content, "html.parser")
-        items, base = [], "https://www.nsw.gov.au"
-        
-        # 1. Scraping News Section
-        if "/news" in url:
-            src = "NSW-NEWS"
-            # NSW Gov uses nsw-card or views-row for news items
-            for card in soup.select('.nsw-card, .views-row'):
-                link_tag = card.find('a', href=True)
-                if link_tag:
-                    title = link_tag.get_text().strip()
-                    href = link_tag['href']
-                    full_url = clean_url(href, base)
-                    if len(title) > 20:
-                        items.append(f"📰 [{src}] {html.escape(title)}\n🔗 {full_url}")
-                if len(items) >= MAX_ITEMS: break
-
-        # 2. Scraping Work Orders Register (Table or List)
-        elif "/register-of-building-work-orders" in url:
-            src = "NSW-ORDERS"
-            # Often these registers are in table rows or specific card lists
-            for row in soup.select('tr, .nsw-list-item'):
-                link_tag = row.find('a', href=True)
-                if link_tag:
-                    text = link_tag.get_text().strip()
-                    href = link_tag['href']
-                    full_url = clean_url(href, base)
-                    if "order" in text.lower() or "building" in text.lower():
-                        items.append(f"⚖️ [{src}] {html.escape(text)}\n🔗 {full_url}")
-                if len(items) >= MAX_ITEMS: break
-
-        return items
-    except Exception as e:
-        log(f"✗ Error at {url}: {e}")
-        return []
-
-def call_ai(text):
-    if not CF_TOKEN or not CF_ACCOUNT_ID: return None
-    url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3-8b-instruct"
-    headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
-    
-    prompt = f"""NSW Building Commission updates. Focus on news, reforms, and building work orders.
-Rules: 1) Link EVERY item 2) Labels [NSW-NEWS], [NSW-ORDERS] 3) Bullets+emojis 4) Short summaries.
-Content:
-{text[:7000]}
-Format:
-🏙️ <b>NSW Building News</b>
-• [Summary] 🔗 [URL]
-⚖️ <b>Work Orders Register</b>
-• [Summary] 🔗 [URL]"""
-    
-    try:
-        r = requests.post(url, headers=headers, json={"messages": [{"role": "user", "content": prompt}], "max_tokens": 1000}, timeout=90)
-        return r.json()['result']['response'].strip()
-    except Exception as e:
-        log(f"✗ AI: {e}")
-        return None
-
-def main():
-    log("🚀 NSW Scraper Started")
-    all_content = []
-    for u in TARGET_URLS:
-        all_content.extend(scrape_nsw(u))
-    
-    if not all_content:
-        log("⚠️ No new content found.")
-        return
-
-    # Join the content for AI processing
-    raw_text = "\n\n".join(all_content)
-    summary = call_ai(raw_text) or raw_text[:3500]
-    
-    final_msg = f"🏢 <b>NSW Building Commission Update</b>\n📅 {time.strftime('%d %b %Y')}\n\n{summary}"
-    send_telegram(final_msg)
-    log("✅ Finished")
-
-if __name__ == "__main__":
-    main()
+Successfully installed beautifulsoup4-4.14.3 certifi-2026.2.25 charset_normalizer-3.4.5 idna-3.11 requests-2.32.5 soupsieve-2.8.3 typing-extensions-4.15.0 urllib3-2.6.3
+5s
+Run python monitor.py
+📝 [LOG] 🚀 NSW Scraper Started
+📝 [LOG] 🔍 Scraping: https://www.nsw.gov.au/departments-and-agencies/building-commission/news
+📝 [LOG] 🔍 Scraping: https://www.nsw.gov.au/departments-and-agencies/building-commission/register-of-building-work-orders
+📝 [LOG] ⚠️ No new content found.
+0s
+Post job cleanup.
+1s
+Post job cleanup.
+/usr/bin/git version
+git version 2.53.0
+Temporarily overriding HOME='/home/runner/work/_temp/7e594549-ac8e-4327-8506-9c6f23fb6f98' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/NSW_Building_News/NSW_Building_News
+/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+0s
+Cleaning up orphan processes
