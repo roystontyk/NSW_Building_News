@@ -6,18 +6,20 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ✅ FIXED: No trailing spaces in URLs
+# UPDATED: Direct URLs to the actual lists
 NSW_URLS = [
     "https://www.nsw.gov.au/departments-and-agencies/building-commission/news",
-    "https://www.nsw.gov.au/departments-and-agencies/building-commission/register-of-building-work-orders"
+    # The actual order register often lives on this Fair Trading URL:
+    "https://www.fairtrading.nsw.gov.au/help-centre/online-tools/rab-act-orders-register"
 ]
 
 def send_telegram(text):
-    if not text: 
-        return
-    # ✅ FIXED: No spaces in bot URL
+    if not text: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
+    # Added error logging for the post request
+    response = requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
+    if response.status_code != 200:
+        print(f"❌ Telegram Error: {response.text}")
 
 def get_nsw_data():
     print("🔍 Fetching headlines...")
@@ -29,65 +31,54 @@ def get_nsw_data():
             r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
             soup = BeautifulSoup(r.content, "html.parser")
             
-            # This 'main' tag ignores all the header/footer menu junk
-            content = soup.find('main')
-            if not content: 
-                print(f"⚠️ No <main> tag found on {url}")
-                continue
-
-            # ✅ DETECT PAGE TYPE
-            is_register = "register" in url
-            
-            if is_register:
-                print(f"📋 Parsing Register page...")
-                # Register page uses tables or definition lists
-                # Look for table rows, list items, or links in the main content
-                for elem in content.find_all(['tr', 'li', 'dt', 'dd']):
-                    a = elem.find('a', href=True)
-                    if a:
-                        title = a.get_text().strip()
-                        link = a['href']
-                        
-                        # Filter junk
-                        if len(title) < 10: 
-                            continue
-                        if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "share", "back to", "top of page", "skip"]): 
-                            continue
-                        
-                        # Fix relative links
-                        full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
-                        
-                        # Prevent duplicates
-                        if full_url not in seen_links and "nsw.gov.au" in full_url:
-                            results.append(f"• <b>[⚖️ ORDER]</b> {html.escape(title)}\n🔗 {full_url}")
-                            seen_links.add(full_url)
+            # Use a broader search: find all 'a' tags, then filter by their location or class
+            for a in soup.find_all('a', href=True):
+                title = a.get_text().strip()
+                link = a['href']
                 
-                # Fallback: grab all links in main that look like order titles
-                if len(results) == 0:
-                    print("🔍 Fallback: scanning all links in register page...")
-                    for a in content.find_all('a', href=True):
-                        title = a.get_text().strip()
-                        link = a['href']
-                        
-                        if len(title) < 15: 
-                            continue
-                        if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "share", "back to", "home", "contact", "menu"]): 
-                            continue
-                        
-                        full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
-                        
-                        if full_url not in seen_links and "register" in full_url and "nsw.gov.au" in full_url:
-                            results.append(f"• <b>[⚖️ ORDER]</b> {html.escape(title)}\n🔗 {full_url}")
-                            seen_links.add(full_url)
+                # REFINED FILTERS:
+                # 1. Ignore links with no text or very short junk text
+                if len(title) < 10: continue
+                
+                # 2. Kill social media and navigational junk
+                junk_keywords = ["facebook", "linkedin", "twitter", "share", "back to", "view menu", "skip to"]
+                if any(x in title.lower() for x in junk_keywords): continue
+                
+                # 3. Fix relative links
+                full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
+                if "fairtrading" in url and not full_url.startswith("http"):
+                    full_url = f"https://www.fairtrading.nsw.gov.au{link}"
+                
+                # 4. Filter for relevant keywords to avoid grabbing random site links
+                relevant = ["order", "news", "warning", "rectification", "prohibition", "building", "undertaking"]
+                if not any(k in title.lower() or k in full_url.lower() for k in relevant):
+                    continue
+
+                # 5. Prevent duplicates
+                if full_url not in seen_links:
+                    label = "⚖️ ORDER" if "order" in full_url.lower() or "register" in url else "📰 NEWS"
+                    results.append(f"• <b>[{label}]</b> {html.escape(title)}\n🔗 {full_url}")
+                    seen_links.add(full_url)
+
+        except Exception as e:
+            print(f"Error on {url}: {e}")
             
-            else:
-                # News page - original logic
-                print(f"📰 Parsing News page...")
-                for a in content.find_all('a', href=True):
-                    title = a.get_text().strip()
-                    link = a['href']
-                    
-                    # Basic Filters to keep the list clean
-                    if len(title) < 15: 
-                        continue
-                    if any(x in title.lower() for x in ["facebook", "linkedin", "twitter", "
+    return results
+
+def main():
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("Missing Secrets!")
+        return
+
+    headlines = get_nsw_data()
+    
+    if headlines:
+        header = f"🏢 <b>NSW Building Commission Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
+        # Combine items, limiting to top 20 to avoid Telegram message size limits
+        send_telegram(header + "\n\n".join(headlines[:20]))
+        print(f"✅ Message sent with {len(headlines[:20])} items.")
+    else:
+        print("🧐 No headlines found.")
+
+if __name__ == "__main__":
+    main()
