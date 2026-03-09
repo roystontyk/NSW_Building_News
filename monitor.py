@@ -6,9 +6,11 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Direct links to the actual lists
 NSW_URLS = [
     "https://www.nsw.gov.au/departments-and-agencies/building-commission/news",
-    "https://www.nsw.gov.au/departments-and-agencies/building-commission/register-of-building-work-orders"
+    # This is the actual database where the addresses and orders live:
+    "https://www.fairtrading.nsw.gov.au/help-centre/online-tools/rab-act-orders-register"
 ]
 
 def send_telegram(text):
@@ -26,34 +28,26 @@ def get_nsw_data():
             r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
             soup = BeautifulSoup(r.content, "html.parser")
             
-            # Lock onto 'main' to avoid header/footer menus
-            content = soup.find('main')
-            if not content: continue
-
-            for a in content.find_all('a', href=True):
+            # This identifies the middle of the page and skips the header/footer menus
+            content_area = soup.find('main') or soup.find('div', id='main-content') or soup
+            
+            for a in content_area.find_all('a', href=True):
                 title = a.get_text().strip()
                 link = a['href']
                 
-                # 1. CLEANING JUNK: Skip logout, login, and tiny menu links
-                lower_title = title.lower()
-                junk = ["logout", "my account", "login", "skip to", "back to", "department", "facebook", "linkedin", "twitter"]
-                if any(x in lower_title for x in junk) or len(title) < 15:
+                # 1. Skip tiny links or navigation junk like "Logout"
+                if len(title) < 12 or any(x in title.lower() for x in ["logout", "my account", "login", "skip to"]):
                     continue
                 
-                # 2. FIX LINKS
+                # 2. Fix relative links to be full URLs
                 full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
+                if "fairtrading" in url and not link.startswith("http"):
+                    full_url = f"https://www.fairtrading.nsw.gov.au{link}"
                 
-                # 3. RELEVANCE: Only grab links that look like articles or orders
-                # This stops it from grabbing "Building Commission" (the page title link)
-                path = full_url.lower()
-                is_relevant = any(x in path for x in ["/news/", "/register-of-building-work-orders/", "order-", "rectification"])
-                
-                if is_relevant and full_url not in seen_links:
-                    # Final check: Don't grab the page we are currently on
-                    if full_url.strip('/') == url.strip('/'):
-                        continue
-                        
-                    label = "⚖️ ORDER" if "register" in url else "📰 NEWS"
+                # 3. Prevent duplicates
+                if full_url not in seen_links:
+                    # Label based on the page it came from
+                    label = "⚖️ ORDER" if "order" in full_url.lower() or "fairtrading" in url else "📰 NEWS"
                     results.append(f"• <b>[{label}]</b> {html.escape(title)}\n🔗 {full_url}")
                     seen_links.add(full_url)
 
@@ -71,11 +65,11 @@ def main():
     
     if headlines:
         header = f"🏢 <b>NSW Building Commission Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
-        # Combine items, limiting to top 20
+        # Combine items, limiting to top 20 to avoid Telegram character limits
         send_telegram(header + "\n\n".join(headlines[:20]))
-        print(f"✅ Sent {len(headlines)} items.")
+        print("✅ Report sent.")
     else:
-        print("🧐 No new headlines found.")
+        print("🧐 No headlines found.")
 
 if __name__ == "__main__":
     main()
