@@ -1,19 +1,27 @@
 name: NSW Building Commission Monitor
+
 on:
   schedule:
     - cron: '0 21 * * *'  # Runs daily at 7 AM Sydney time
-  workflow_dispatch:
+  workflow_dispatch:      # Manual trigger button
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests beautifulsoup4
-      - run: python monitor.py
+      
+      - name: Install dependencies
+        # Added lxml to prevent parsing crashes
+        run: pip install requests beautifulsoup4 lxml
+      
+      - name: Run Master Monitor
+        run: python monitor.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
