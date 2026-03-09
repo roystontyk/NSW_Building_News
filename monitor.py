@@ -6,20 +6,20 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Direct links to the actual lists
+# The URLs we scrape for live headlines
 NSW_URLS = [
     "https://www.nsw.gov.au/departments-and-agencies/building-commission/news",
-    # This is the actual database where the addresses and orders live:
-    "https://www.fairtrading.nsw.gov.au/help-centre/online-tools/rab-act-orders-register"
+    "https://www.nsw.gov.au/departments-and-agencies/building-commission/register-of-building-work-orders"
 ]
 
 def send_telegram(text):
     if not text: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    # Post the message
     requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
 
 def get_nsw_data():
-    print("🔍 Fetching headlines...")
+    print("🔍 Fetching live headlines...")
     results = []
     seen_links = set()
 
@@ -28,26 +28,26 @@ def get_nsw_data():
             r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
             soup = BeautifulSoup(r.content, "html.parser")
             
-            # This identifies the middle of the page and skips the header/footer menus
-            content_area = soup.find('main') or soup.find('div', id='main-content') or soup
-            
-            for a in content_area.find_all('a', href=True):
+            # Focus on the main content to avoid menu/footer junk
+            content = soup.find('main')
+            if not content: continue
+
+            for a in content.find_all('a', href=True):
                 title = a.get_text().strip()
                 link = a['href']
                 
-                # 1. Skip tiny links or navigation junk like "Logout"
-                if len(title) < 12 or any(x in title.lower() for x in ["logout", "my account", "login", "skip to"]):
+                # 1. CLEANING: Skip navigation junk and short fragments
+                lower_title = title.lower()
+                junk = ["logout", "login", "top of page", "skip to", "back to", "facebook", "linkedin", "twitter"]
+                if any(x in lower_title for x in junk) or len(title) < 15:
                     continue
                 
-                # 2. Fix relative links to be full URLs
+                # 2. FIX LINKS: Ensure they are absolute URLs
                 full_url = link if link.startswith("http") else f"https://www.nsw.gov.au{link}"
-                if "fairtrading" in url and not link.startswith("http"):
-                    full_url = f"https://www.fairtrading.nsw.gov.au{link}"
                 
-                # 3. Prevent duplicates
+                # 3. PREVENT DUPLICATES: Only add if we haven't seen this URL yet
                 if full_url not in seen_links:
-                    # Label based on the page it came from
-                    label = "⚖️ ORDER" if "order" in full_url.lower() or "fairtrading" in url else "📰 NEWS"
+                    label = "⚖️ ORDER/REG" if "register" in url else "📰 NEWS"
                     results.append(f"• <b>[{label}]</b> {html.escape(title)}\n🔗 {full_url}")
                     seen_links.add(full_url)
 
@@ -58,18 +58,35 @@ def get_nsw_data():
 
 def main():
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Missing Secrets!")
+        print("Missing Telegram Secrets!")
         return
 
     headlines = get_nsw_data()
     
+    # 🏢 HEADER
+    header = f"🏢 <b>NSW Building Commission Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
+    
+    # 📝 SCRAPED CONTENT
     if headlines:
-        header = f"🏢 <b>NSW Building Commission Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
-        # Combine items, limiting to top 20 to avoid Telegram character limits
-        send_telegram(header + "\n\n".join(headlines[:20]))
-        print("✅ Report sent.")
+        body = "\n\n".join(headlines[:15]) # Top 15 items
     else:
-        print("🧐 No headlines found.")
+        body = "🧐 <i>No new headlines found today. Check the direct links below for manual verification.</i>"
+
+    # 🔗 PERMANENT RESOURCE LINKS (Your Requested Update)
+    footer = (
+        "\n\n---\n"
+        "<b>📂 PERMANENT REGISTERS (Direct Access):</b>\n\n"
+        "⚖️ <b>Building Work Orders (RAB Act):</b>\n"
+        "https://www.fairtrading.nsw.gov.au/help-centre/online-tools/rab-act-orders-register\n\n"
+        "✍️ <b>Enforceable Undertakings Register:</b>\n"
+        "https://www.nsw.gov.au/departments-and-agencies/fair-trading/how-we-regulate/enforceable-undertakings-register\n\n"
+        "📢 <b>Latest Media Warnings:</b>\n"
+        "https://www.nsw.gov.au/departments-and-agencies/building-commission/news"
+    )
+
+    # COMBINE AND SEND
+    send_telegram(header + body + footer)
+    print("✅ Final message with footer links sent.")
 
 if __name__ == "__main__":
     main()
