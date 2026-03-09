@@ -1,6 +1,10 @@
 name: NSW Building Commission Monitor
 
 on:
+# 🔴 NEW: This allows the iPhone/Orchestrator to trigger this repo
+  repository_dispatch:
+    types: [trigger-all-repos]
+    
   schedule:
     - cron: '0 21 * * *'  # Runs daily at 7 AM Sydney time
   workflow_dispatch:      # Manual trigger button
