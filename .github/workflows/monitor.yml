@@ -1,13 +1,17 @@
 name: NSW Building Commission Monitor
 
 on:
-# 🔴 NEW: This allows the iPhone/Orchestrator to trigger this repo
+  # Allows your iPhone/Orchestrator to trigger this via API
   repository_dispatch:
     types: [trigger-all-repos]
     
+  # MATCHED: Runs daily at 8:30 AM Sydney/Melbourne time (AEDT)
+  # 21:30 UTC = 08:30 AEDT
   schedule:
-    - cron: '0 21 * * *'  # Runs daily at 7 AM Sydney time
-  workflow_dispatch:      # Manual trigger button
+    - cron: '30 21 * * *' 
+    
+  # Manual trigger button
+  workflow_dispatch:
 
 jobs:
   monitor:
@@ -21,7 +25,6 @@ jobs:
           python-version: '3.11'
       
       - name: Install dependencies
-        # Added lxml to prevent parsing crashes
         run: pip install requests beautifulsoup4 lxml
       
       - name: Run Master Monitor
@@ -29,3 +32,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Ensures the underlying system recognizes the local timezone
+          TZ: 'Australia/Sydney'
